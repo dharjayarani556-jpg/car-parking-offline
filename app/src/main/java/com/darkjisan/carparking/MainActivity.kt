@@ -70,30 +70,46 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
 
     companion object {
         const val MENU = 0
-        const val PLAY = 1
-        const val PANEL = 2
+        const val LEVELS = 1
+        const val PLAY = 2
+        const val MAX_LEVEL = 100
+
         const val ROLE_NONE = 0
         const val ROLE_LEFT = 1
         const val ROLE_RIGHT = 2
         const val ROLE_GAS = 3
         const val ROLE_REV = 4
-        const val MAX_LEVEL = 100
     }
 
     private val prefs = context.getSharedPreferences("jishan_park", Context.MODE_PRIVATE)
+
     private var state = MENU
+    private var showDotsMenu = false
     private var w = 0f
     private var h = 0f
     private var ready = false
 
     private val cars = listOf(
-        CarSkin("Red", Color.parseColor("#e74c3c"), Color.parseColor("#2c3e50")),
-        CarSkin("Blue", Color.parseColor("#3498db"), Color.parseColor("#2c3e50")),
-        CarSkin("Green", Color.parseColor("#1abc9c"), Color.parseColor("#2c3e50")),
-        CarSkin("Gold", Color.parseColor("#f1c40f"), Color.parseColor("#6c5ce7")),
-        CarSkin("Purple", Color.parseColor("#9b59b6"), Color.parseColor("#2c3e50"))
+        CarSkin("Red Racer", Color.parseColor("#e74c3c"), Color.parseColor("#2c3e50")),
+        CarSkin("Blue Bolt", Color.parseColor("#3498db"), Color.parseColor("#2c3e50")),
+        CarSkin("Green GT", Color.parseColor("#1abc9c"), Color.parseColor("#2c3e50")),
+        CarSkin("Gold King", Color.parseColor("#f1c40f"), Color.parseColor("#6c5ce7")),
+        CarSkin("Purple Pro", Color.parseColor("#9b59b6"), Color.parseColor("#2c3e50")),
+        CarSkin("Orange X", Color.parseColor("#e67e22"), Color.parseColor("#2c3e50"))
     )
     private var selectedCar = 0
+
+    // Stats
+    private var score = 0
+    private var totalStars = 0
+    private var crashCount = 0
+    private var winCount = 0
+    private var maxLevelReached = 1
+
+    // Settings
+    private var steerSens = 1 // 0 small, 1 normal, 2 big
+    private var gyroOn = false
+    private var soundOn = true
 
     private var carX = 200f
     private var carY = 400f
@@ -101,29 +117,22 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private var speed = 0f
     private val maxSpeed = 6.8f
     private val accel = 0.2f
-    private val friction = 0.085f
-    private var turnRate = 3.0f
+    private val friction = 0.09f
     private val carLength = 100f
     private val carWidth = 52f
 
     private val pointerRole = HashMap<Int, Int>()
+    private var gyroSteer = 0f
 
     private var level = 1
-    private var score = 0
     private var parked = false
     private var crashed = false
-    private var message = "Car choose → START"
+    private var message = ""
     private var stars = 0
-    private var totalStars = 0
-    private var crashes = 0
-    private var wins = 0
-    private var maxReached = 1
     private var levelStartMs = 0L
-
-    // Settings
-    private var steerBig = true
-    private var gyroOn = false
-    private var gyroSteer = 0f
+    private var blastTimer = 0
+    private var blastX = 0f
+    private var blastY = 0f
 
     private var slotX = 0f
     private var slotY = 0f
@@ -134,24 +143,20 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private val barriers = mutableListOf<RectF>()
     private val parkedCars = mutableListOf<ParkedCar>()
 
-    // Blast effect
-    private var blastX = 0f
-    private var blastY = 0f
-    private var blastLife = 0
-
-    // Level select scroll in panel
-    private var panelScroll = 0f
+    private var levelPage = 0 // 20 levels per page
 
     private val sensorManager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor: Sensor? =
-        sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
     private var tone: ToneGenerator? = try {
         ToneGenerator(AudioManager.STREAM_MUSIC, 60)
-    } catch (_: Throwable) { null }
+    } catch (_: Throwable) {
+        null
+    }
 
+    // UI rects
     private val btnLeft = RectF()
     private val btnRight = RectF()
     private val btnGas = RectF()
@@ -163,8 +168,16 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private val btnNext = RectF()
     private val btnStart = RectF()
     private val btnDots = RectF()
-    private val panelRect = RectF()
-    private val carCards = Array(5) { RectF() }
+    private val dotsPanel = RectF()
+    private val btnLevels = RectF()
+    private val btnGyro = RectF()
+    private val btnSens = RectF()
+    private val btnSound = RectF()
+    private val carCards = Array(6) { RectF() }
+    private val levelCells = Array(20) { RectF() }
+    private val btnPagePrev = RectF()
+    private val btnPageNext = RectF()
+    private val btnBack = RectF()
 
     private val skyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val asphalt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2d3436") }
@@ -185,10 +198,10 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private val carBody = Paint(Paint.ANTI_ALIAS_FLAG)
     private val carDark = Paint(Paint.ANTI_ALIAS_FLAG)
     private val carGlass = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#74b9ff"); alpha = 200
+        color = Color.parseColor("#74b9ff"); alpha = 210
     }
     private val carLight = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#ffeaa7") }
-    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; alpha = 75 }
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; alpha = 80 }
     private val rearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#ff7675") }
     private val uiBg = Paint().apply { color = Color.parseColor("#0a0a12"); alpha = 200 }
     private val menuBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0f0c29") }
@@ -196,7 +209,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private val cardSel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#a29bfe"); style = Paint.Style.STROKE; strokeWidth = 5f
     }
-    private val panelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#12121f"); alpha = 245 }
+    private val panelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1e1e30"); alpha = 245 }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE; textSize = 28f; typeface = Typeface.DEFAULT_BOLD
     }
@@ -213,7 +226,8 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private val revFace = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#d63031") }
     private val revOn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#ff7675") }
     private val startPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#00b894") }
-    private val lockedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#4a4a5a") }
+    private val lockPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#636e72") }
+    private val openPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#6c5ce7") }
     private val blastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#fdcb6e"); textSize = 64f; textAlign = Paint.Align.CENTER
     }
@@ -224,7 +238,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         override fun run() {
             if (!running) return
             if (ready && state == PLAY) update()
-            if (blastLife > 0) blastLife--
+            if (blastTimer > 0) blastTimer--
             invalidate()
             handler.postDelayed(this, 16L)
         }
@@ -232,18 +246,19 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
 
     init {
         setOnTouchListener(this)
-        loadStats()
         setBackgroundColor(Color.parseColor("#0f0c29"))
+        loadStats()
     }
 
     private fun loadStats() {
         score = prefs.getInt("score", 0)
         totalStars = prefs.getInt("stars", 0)
-        crashes = prefs.getInt("crashes", 0)
-        wins = prefs.getInt("wins", 0)
-        maxReached = prefs.getInt("maxReached", 1).coerceIn(1, MAX_LEVEL)
-        steerBig = prefs.getBoolean("steerBig", true)
-        gyroOn = prefs.getBoolean("gyroOn", false)
+        crashCount = prefs.getInt("crashes", 0)
+        winCount = prefs.getInt("wins", 0)
+        maxLevelReached = prefs.getInt("maxLevel", 1).coerceIn(1, MAX_LEVEL)
+        steerSens = prefs.getInt("sens", 1)
+        gyroOn = prefs.getBoolean("gyro", false)
+        soundOn = prefs.getBoolean("sound", true)
         selectedCar = prefs.getInt("car", 0).coerceIn(0, cars.lastIndex)
     }
 
@@ -251,11 +266,12 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         prefs.edit()
             .putInt("score", score)
             .putInt("stars", totalStars)
-            .putInt("crashes", crashes)
-            .putInt("wins", wins)
-            .putInt("maxReached", maxReached)
-            .putBoolean("steerBig", steerBig)
-            .putBoolean("gyroOn", gyroOn)
+            .putInt("crashes", crashCount)
+            .putInt("wins", winCount)
+            .putInt("maxLevel", maxLevelReached)
+            .putInt("sens", steerSens)
+            .putBoolean("gyro", gyroOn)
+            .putBoolean("sound", soundOn)
             .putInt("car", selectedCar)
             .apply()
     }
@@ -265,44 +281,43 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
             running = true
             handler.post(loop)
         }
-        if (gyroOn) registerGyro()
+        updateGyroRegistration()
     }
 
     fun pauseGame() {
         running = false
         handler.removeCallbacks(loop)
-        unregisterGyro()
+        sensorManager.unregisterListener(this)
         saveStats()
     }
 
     fun release() {
-        unregisterGyro()
         tone?.release()
         tone = null
-        saveStats()
+        sensorManager.unregisterListener(this)
     }
 
-    private fun registerGyro() {
-        rotationSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+    private fun updateGyroRegistration() {
+        sensorManager.unregisterListener(this)
+        if (gyroOn && rotationSensor != null && state == PLAY) {
+            sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
         }
-    }
-
-    private fun unregisterGyro() {
-        try { sensorManager.unregisterListener(this) } catch (_: Throwable) {}
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (!gyroOn || event == null || state != PLAY) return
-        // Use Y axis tilt for steer approx
-        val v = if (event.values.size >= 2) event.values[1] else 0f
-        gyroSteer = (-v * 2.2f).coerceIn(-1.2f, 1.2f)
+        // Landscape: use Y axis tilt for steer approx
+        gyroSteer = (-event.values[1] * 0.35f).coerceIn(-1.2f, 1.2f)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun beep(type: Int) {
-        try { tone?.startTone(type, 120) } catch (_: Throwable) {}
+        if (!soundOn) return
+        try {
+            tone?.startTone(type, 120)
+        } catch (_: Throwable) {
+        }
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldw: Int, oldh: Int) {
@@ -318,39 +333,66 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     }
 
     private fun layoutAll() {
-        val scale = if (steerBig) 0.155f else 0.115f
-        val s = min(w, h) * scale
+        val s = min(w, h) * 0.14f
         val pad = 14f
         btnLeft.set(pad, h - s * 2.15f - pad, pad + s, h - s - pad)
         btnRight.set(pad + s + 12f, h - s * 2.15f - pad, pad + s * 2 + 12f, h - s - pad)
         btnGas.set(w - pad - s, h - s * 2.15f - pad, w - pad, h - s - pad)
         btnRev.set(w - pad - s, h - s - pad + 4f, w - pad, h - pad)
-        val g = 22f
+        val g = 20f
         touchLeft.set(btnLeft.left - g, btnLeft.top - g, btnLeft.right + g, btnLeft.bottom + g)
         touchRight.set(btnRight.left - g, btnRight.top - g, btnRight.right + g, btnRight.bottom + g)
         touchGas.set(btnGas.left - g, btnGas.top - g, btnGas.right + g, btnGas.bottom + g)
         touchRev.set(btnRev.left - g, btnRev.top - g, btnRev.right + g, btnRev.bottom + g)
-        btnNext.set(w / 2 - 120f, h * 0.46f, w / 2 + 120f, h * 0.46f + 68f)
-        btnDots.set(w - 70f, 8f, w - 12f, 52f)
-        panelRect.set(w * 0.12f, h * 0.08f, w * 0.88f, h * 0.92f)
-        btnStart.set(w / 2 - 130f, h * 0.78f, w / 2 + 130f, h * 0.78f + 68f)
-        val cardW = min(w * 0.14f, 120f)
-        val gap = 12f
-        val total = cardW * 5 + gap * 4
-        var x = (w - total) / 2
-        val y = h * 0.4f
-        for (i in 0 until 5) {
-            carCards[i].set(x, y, x + cardW, y + cardW * 1.15f)
-            x += cardW + gap
+        btnNext.set(w / 2 - 130f, h * 0.46f, w / 2 + 130f, h * 0.46f + 70f)
+        btnDots.set(w - 70f, 10f, w - 12f, 52f)
+        dotsPanel.set(w - 320f, 56f, w - 12f, 320f)
+        btnStart.set(w / 2 - 140f, h * 0.78f, w / 2 + 140f, h * 0.78f + 68f)
+        btnLevels.set(w / 2 - 140f, h * 0.68f, w / 2 + 140f, h * 0.68f + 56f)
+
+        val cardW = min(w * 0.13f, 110f)
+        val cardH = cardW * 1.15f
+        val total = cardW * 6 + 10f * 5
+        var x = (w - total) / 2f
+        val y = h * 0.36f
+        for (i in 0 until 6) {
+            carCards[i].set(x, y, x + cardW, y + cardH)
+            x += cardW + 10f
         }
+
+        // level grid 5x4
+        val cellW = (w - 80f) / 5f
+        val cellH = (h - 140f) / 4f
+        var idx = 0
+        for (row in 0 until 4) {
+            for (col in 0 until 5) {
+                val lx = 40f + col * cellW + 6f
+                val ly = 70f + row * cellH + 6f
+                levelCells[idx].set(lx, ly, lx + cellW - 12f, ly + cellH - 12f)
+                idx++
+            }
+        }
+        btnPagePrev.set(40f, h - 56f, 160f, h - 16f)
+        btnPageNext.set(w - 160f, h - 56f, w - 40f, h - 16f)
+        btnBack.set(w / 2 - 70f, h - 56f, w / 2 + 70f, h - 16f)
+        btnGyro.set(w * 0.08f, h * 0.58f, w * 0.32f, h * 0.64f)
+        btnSens.set(w * 0.34f, h * 0.58f, w * 0.66f, h * 0.64f)
+        btnSound.set(w * 0.68f, h * 0.58f, w * 0.92f, h * 0.64f)
+    }
+
+    private fun turnRate(): Float = when (steerSens) {
+        0 -> 2.0f
+        2 -> 4.2f
+        else -> 3.0f
     }
 
     private fun applySkin() {
-        carBody.color = cars[selectedCar].body
-        carDark.color = cars[selectedCar].dark
+        val c = cars[selectedCar]
+        carBody.color = c.body
+        carDark.color = c.dark
     }
 
-    /** Build one of 100 levels — medium hard, varied. */
+    /** Build one of 100 levels — medium hard, progressive */
     private fun setupLevel(lv: Int) {
         if (w < 10f) return
         level = lv.coerceIn(1, MAX_LEVEL)
@@ -363,112 +405,95 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         parkedCars.clear()
         pointerRole.clear()
         gyroSteer = 0f
+        blastTimer = 0
         levelStartMs = SystemClock.elapsedRealtime()
 
-        val t = 1f - (level * 0.0025f).coerceAtMost(0.22f)
-        slotW = 90f * t
-        slotH = 152f * t
+        val t = 1f - (level - 1) * 0.0025f
+        slotW = (90f * t).coerceAtLeast(70f)
+        slotH = (152f * t).coerceAtLeast(120f)
 
         // Borders always
         walls.add(RectF(0f, h * 0.08f, 18f, h))
         walls.add(RectF(w - 18f, h * 0.08f, w, h))
-        walls.add(RectF(0f, h - 18f, w, h))
+        walls.add(RectF(0f, h * 0.08f, w, h * 0.08f + 14f))
 
         val pattern = (level - 1) % 10
-        carX = w * 0.12f
+        val difficulty = (level - 1) / 10 // 0..9 bands
+
+        carX = w * 0.14f
         carY = h * 0.55f
         carAngle = 0f
 
         when (pattern) {
             0 -> { // straight
                 slotX = w * 0.82f; slotY = h * 0.55f; slotAngle = 0f
-                if (level > 5) addSideCars(w * 0.45f, h * 0.3f, 3)
             }
-            1 -> { // side bay
+            1 -> { // side
                 carY = h * 0.75f
-                slotX = w * 0.75f; slotY = h * 0.32f; slotAngle = 90f
-                walls.add(RectF(w * 0.38f, h * 0.12f, w * 0.44f, h * 0.88f))
-                addSideCars(w * 0.55f, h * 0.6f, 2)
+                slotX = w * 0.78f; slotY = h * 0.3f; slotAngle = 90f
+                walls.add(RectF(w * 0.38f, h * 0.15f, w * 0.44f, h * 0.9f))
             }
             2 -> { // angle
-                carX = w * 0.15f; carY = h * 0.22f; carAngle = 85f
-                slotX = w * 0.72f; slotY = h * 0.65f; slotAngle = -28f
+                carX = w * 0.2f; carY = h * 0.22f; carAngle = 90f
+                slotX = w * 0.72f; slotY = h * 0.68f; slotAngle = -30f + difficulty
                 walls.add(RectF(w * 0.42f, h * 0.3f, w * 0.55f, h * 0.38f))
-                barriers.add(RectF(w * 0.3f, h * 0.5f, w * 0.38f, h * 0.58f))
             }
             3 -> { // corridor
-                slotX = w * 0.8f; slotY = h * 0.28f; slotAngle = 0f
-                walls.add(RectF(w * 0.3f, h * 0.12f, w * 0.36f, h * 0.48f))
-                walls.add(RectF(w * 0.3f, h * 0.58f, w * 0.36f, h * 0.9f))
-                walls.add(RectF(w * 0.55f, h * 0.35f, w * 0.61f, h * 0.75f))
+                slotX = w * 0.8f; slotY = h * 0.5f; slotAngle = 0f
+                walls.add(RectF(w * 0.3f, h * 0.15f, w * 0.36f, h * 0.42f))
+                walls.add(RectF(w * 0.3f, h * 0.58f, w * 0.36f, h * 0.92f))
             }
-            4 -> { // U shape feel
-                carY = h * 0.7f; carAngle = -10f
-                slotX = w * 0.7f; slotY = h * 0.35f; slotAngle = 180f
-                walls.add(RectF(w * 0.35f, h * 0.2f, w * 0.7f, h * 0.28f))
-                walls.add(RectF(w * 0.35f, h * 0.2f, w * 0.42f, h * 0.7f))
-                addSideCars(w * 0.5f, h * 0.55f, 2)
+            4 -> { // reverse start
+                carX = w * 0.85f; carY = h * 0.55f; carAngle = 180f
+                slotX = w * 0.2f; slotY = h * 0.55f; slotAngle = 180f
             }
-            5 -> {
-                slotX = w * 0.78f; slotY = h * 0.5f; slotAngle = 15f
-                barriers.add(RectF(w * 0.4f, h * 0.4f, w * 0.48f, h * 0.55f))
-                barriers.add(RectF(w * 0.55f, h * 0.25f, w * 0.62f, h * 0.35f))
-                addSideCars(w * 0.25f, h * 0.3f, 2)
+            5 -> { // L shape
+                carY = h * 0.8f
+                slotX = w * 0.75f; slotY = h * 0.25f; slotAngle = 90f
+                walls.add(RectF(w * 0.25f, h * 0.4f, w * 0.7f, h * 0.48f))
+                walls.add(RectF(w * 0.45f, h * 0.15f, w * 0.52f, h * 0.48f))
             }
-            6 -> {
-                carX = w * 0.2f; carY = h * 0.8f; carAngle = 0f
-                slotX = w * 0.55f; slotY = h * 0.25f; slotAngle = 90f
-                walls.add(RectF(w * 0.35f, h * 0.35f, w * 0.75f, h * 0.42f))
-                addSideCars(w * 0.7f, h * 0.55f, 3)
+            6 -> { // tight gap
+                slotX = w * 0.78f; slotY = h * 0.55f; slotAngle = 0f
+                walls.add(RectF(w * 0.4f, h * 0.2f, w * 0.48f, h * 0.48f))
+                walls.add(RectF(w * 0.4f, h * 0.62f, w * 0.48f, h * 0.88f))
+                barriers.add(RectF(w * 0.55f, h * 0.48f, w * 0.62f, h * 0.58f))
             }
-            7 -> {
-                slotX = w * 0.8f; slotY = h * 0.7f; slotAngle = -10f
-                walls.add(RectF(w * 0.32f, h * 0.15f, w * 0.4f, h * 0.85f))
-                walls.add(RectF(w * 0.55f, h * 0.15f, w * 0.62f, h * 0.5f))
+            7 -> { // diagonal slot
+                carX = w * 0.15f; carY = h * 0.25f; carAngle = 45f
+                slotX = w * 0.7f; slotY = h * 0.7f; slotAngle = 45f
+                walls.add(RectF(w * 0.35f, h * 0.4f, w * 0.55f, h * 0.48f))
             }
-            8 -> {
-                carAngle = 30f
-                slotX = w * 0.75f; slotY = h * 0.4f; slotAngle = 45f
-                barriers.add(RectF(w * 0.4f, h * 0.55f, w * 0.55f, h * 0.62f))
-                addSideCars(w * 0.28f, h * 0.25f, 2)
+            8 -> { // multi barrier
+                slotX = w * 0.8f; slotY = h * 0.35f; slotAngle = 90f
+                barriers.add(RectF(w * 0.3f, h * 0.35f, w * 0.38f, h * 0.5f))
+                barriers.add(RectF(w * 0.5f, h * 0.55f, w * 0.58f, h * 0.7f))
+                walls.add(RectF(w * 0.42f, h * 0.15f, w * 0.48f, h * 0.9f))
             }
-            else -> {
-                slotX = w * 0.78f; slotY = h * (0.3f + (level % 5) * 0.08f)
-                slotAngle = ((level * 17) % 70).toFloat()
-                walls.add(RectF(w * 0.34f, h * 0.15f, w * 0.41f, h * 0.88f))
-                if (level > 20) barriers.add(RectF(w * 0.5f, h * 0.45f, w * 0.58f, h * 0.55f))
-                addSideCars(w * 0.55f, h * 0.7f, 1 + level % 3)
+            else -> { // challenge mix
+                carX = w * 0.15f; carY = h * 0.7f; carAngle = -15f
+                slotX = w * 0.75f; slotY = h * 0.3f; slotAngle = 70f
+                walls.add(RectF(w * 0.35f, h * 0.2f, w * 0.42f, h * 0.85f))
+                barriers.add(RectF(w * 0.55f, h * 0.5f, w * 0.65f, h * 0.6f))
             }
         }
 
-        // Extra difficulty after level 30 / 60
-        if (level >= 30) {
-            barriers.add(RectF(w * 0.48f, h * 0.7f, w * 0.56f, h * 0.78f))
-        }
-        if (level >= 60) {
-            walls.add(RectF(w * 0.62f, h * 0.2f, w * 0.68f, h * 0.45f))
+        // Side parked cars (traffic) — more on higher levels
+        val traffic = 1 + difficulty / 2
+        val colors = intArrayOf(
+            Color.parseColor("#0984e3"), Color.parseColor("#00b894"),
+            Color.parseColor("#fdcb6e"), Color.parseColor("#e84393")
+        )
+        for (i in 0 until traffic.coerceAtMost(4)) {
+            val px = w * (0.28f + i * 0.12f)
+            val py = if (i % 2 == 0) h * 0.22f else h * 0.82f
+            // avoid overlapping start/slot roughly
+            parkedCars.add(ParkedCar(px, py, if (i % 2 == 0) 90f else 0f, colors[i % colors.size]))
         }
 
         applySkin()
-        message = "Level $level / $MAX_LEVEL — Green P mein park"
-        beep(ToneGenerator.TONE_PROP_BEEP)
-    }
-
-    private fun addSideCars(baseX: Float, baseY: Float, count: Int) {
-        val colors = intArrayOf(
-            Color.parseColor("#636e72"), Color.parseColor("#2d3436"),
-            Color.parseColor("#b2bec3"), Color.parseColor("#0984e3")
-        )
-        for (i in 0 until count) {
-            parkedCars.add(
-                ParkedCar(
-                    baseX + i * 70f,
-                    baseY + (i % 2) * 40f,
-                    if (i % 2 == 0) 0f else 90f,
-                    colors[i % colors.size]
-                )
-            )
-        }
+        message = "Level $level / $MAX_LEVEL  |  Dheere park = ★★★"
+        updateGyroRegistration()
     }
 
     private fun steerValue(): Int {
@@ -476,9 +501,6 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         for (r in pointerRole.values) {
             if (r == ROLE_LEFT) s = -1
             if (r == ROLE_RIGHT) s = 1
-        }
-        if (gyroOn && abs(gyroSteer) > 0.15f) {
-            s = if (gyroSteer < 0) -1 else 1
         }
         return s
     }
@@ -494,10 +516,10 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
 
     private fun update() {
         if (parked || crashed) return
-        val steer = steerValue()
-        val throttle = throttleValue()
+        val thr = throttleValue()
+        val stBtn = steerValue()
 
-        when (throttle) {
+        when (thr) {
             1 -> speed = (speed + accel).coerceAtMost(maxSpeed)
             -1 -> speed = (speed - accel).coerceAtLeast(-maxSpeed * 0.55f)
             else -> {
@@ -506,15 +528,18 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
             }
         }
 
-        if (steer != 0 && (abs(speed) > 0.05f || throttle != 0 || gyroOn)) {
+        var steerAmt = stBtn.toFloat()
+        if (gyroOn) steerAmt += gyroSteer
+        steerAmt = steerAmt.coerceIn(-1.5f, 1.5f)
+
+        if (abs(steerAmt) > 0.05f && (abs(speed) > 0.05f || thr != 0)) {
             val dir = when {
                 speed > 0.05f -> 1f
                 speed < -0.05f -> -1f
-                throttle < 0 -> -1f
+                thr < 0 -> -1f
                 else -> 1f
             }
-            val extra = if (gyroOn) abs(gyroSteer).coerceAtMost(1f) else 1f
-            carAngle += steer * turnRate * dir * extra
+            carAngle += steerAmt * turnRate() * dir
         }
 
         val rad = Math.toRadians(carAngle.toDouble())
@@ -527,43 +552,47 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         for (wall in walls) if (RectF.intersects(box, wall)) { onCrash(); return }
         for (b in barriers) if (RectF.intersects(box, b)) { onCrash(); return }
         for (pc in parkedCars) {
-            val pr = RectF(pc.x - 28f, pc.y - 45f, pc.x + 28f, pc.y + 45f)
+            val pr = RectF(pc.x - 26f, pc.y - 48f, pc.x + 26f, pc.y + 48f)
             if (RectF.intersects(box, pr)) { onCrash(); return }
         }
 
-        if (checkParked()) {
-            parked = true
-            pointerRole.clear()
-            speed = 0f
-            val elapsed = ((SystemClock.elapsedRealtime() - levelStartMs) / 1000L).toInt()
-            stars = when {
-                abs(speed) < 1.2f && elapsed <= 30 -> 3
-                abs(speed) < 2.5f -> 2
-                else -> 1
-            }
-            totalStars += stars
-            wins++
-            score += 80 + stars * 30 + level * 5
-            if (level >= maxReached && level < MAX_LEVEL) maxReached = level + 1
-            else if (level == MAX_LEVEL) maxReached = MAX_LEVEL
-            maxReached = maxReached.coerceAtMost(MAX_LEVEL)
-            saveStats()
-            message = "Win! ${stars}★  Level $level clear"
-            beep(ToneGenerator.TONE_PROP_ACK)
-        }
+        if (checkParked()) onWin()
     }
 
     private fun onCrash() {
         crashed = true
-        crashes++
         pointerRole.clear()
         speed = 0f
+        crashCount++
         blastX = carX
         blastY = carY
-        blastLife = 40
-        saveStats()
+        blastTimer = 45
         message = "💥 Crash! Touch = retry"
         beep(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD)
+        saveStats()
+    }
+
+    private fun onWin() {
+        parked = true
+        pointerRole.clear()
+        speed = 0f
+        val elapsed = ((SystemClock.elapsedRealtime() - levelStartMs) / 1000L).toInt()
+        stars = when {
+            abs(speed) < 1.2f && elapsed <= 30 -> 3
+            abs(speed) < 2.5f -> 2
+            else -> 1
+        }
+        totalStars += stars
+        winCount++
+        score += 80 + stars * 40 + level * 5 + (40 - elapsed).coerceAtLeast(0)
+        if (level >= maxLevelReached && level < MAX_LEVEL) {
+            maxLevelReached = level + 1
+        } else if (level == MAX_LEVEL) {
+            maxLevelReached = MAX_LEVEL
+        }
+        message = "✅ Parked! ${stars}★  Score $score"
+        beep(ToneGenerator.TONE_PROP_ACK)
+        saveStats()
     }
 
     private fun carRect() = RectF(
@@ -577,9 +606,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         val dist = sqrt(dx * dx + dy * dy)
         var ad = abs(norm(carAngle - slotAngle))
         if (ad > 180f) ad = 360f - ad
-        val distLim = 52f - (level * 0.08f).coerceAtMost(12f)
-        val angLim = 32f - (level * 0.05f).coerceAtMost(8f)
-        return dist < distLim && ad < angLim && abs(speed) < 3.4f
+        return dist < 52f && ad < 32f && abs(speed) < 3.6f
     }
 
     private fun norm(a: Float): Float {
@@ -601,48 +628,88 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         if (!ready) return
         when (state) {
             MENU -> drawMenu(canvas)
-            PLAY -> {
-                drawPlay(canvas)
-                if (state == PLAY) { /* panel opened sets PANEL */ }
-            }
-            PANEL -> {
-                drawPlay(canvas)
-                drawPanel(canvas)
-            }
+            LEVELS -> drawLevels(canvas)
+            else -> drawPlay(canvas)
         }
+        if (showDotsMenu) drawDotsPanel(canvas)
     }
 
     private fun drawMenu(canvas: Canvas) {
         canvas.drawRect(0f, 0f, w, h, menuBg)
+        // logo
+        canvas.drawCircle(w / 2f, h * 0.12f, 36f, accent)
+        textPaint.textAlign = Paint.Align.CENTER
+        canvas.drawText("J", w / 2f, h * 0.12f + 12f, textPaint)
         accent.textAlign = Paint.Align.CENTER
-        accent.textSize = 38f
-        canvas.drawText("Jishan Gaming", w / 2f, h * 0.14f, accent)
+        accent.textSize = 36f
+        canvas.drawText("Jishan Gaming", w / 2f, h * 0.22f, accent)
         smallText.textAlign = Paint.Align.CENTER
-        canvas.drawText("100 Levels  •  Offline Parking", w / 2f, h * 0.22f, smallText)
-        canvas.drawText("★$totalStars  Wins:$wins  Crash:$crashes  MaxLv:$maxReached", w / 2f, h * 0.3f, smallText)
+        canvas.drawText("Car select → Levels / START   |   100 Levels", w / 2f, h * 0.28f, smallText)
 
         for (i in cars.indices) {
             val r = carCards[i]
-            canvas.drawRoundRect(r, 16f, 16f, cardBg)
-            if (i == selectedCar) canvas.drawRoundRect(r, 16f, 16f, cardSel)
+            canvas.drawRoundRect(r, 14f, 14f, cardBg)
+            if (i == selectedCar) canvas.drawRoundRect(r, 14f, 14f, cardSel)
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = cars[i].body }
-            canvas.drawRoundRect(r.centerX() - 22f, r.centerY() - 36f, r.centerX() + 22f, r.centerY() + 36f, 10f, 10f, p)
+            canvas.drawRoundRect(r.centerX() - 18f, r.centerY() - 36f, r.centerX() + 18f, r.centerY() + 28f, 10f, 10f, p)
             smallText.textAlign = Paint.Align.CENTER
             canvas.drawText(cars[i].name, r.centerX(), r.bottom - 10f, smallText)
         }
 
-        // options row
-        smallText.textAlign = Paint.Align.CENTER
-        canvas.drawText(
-            "Steer: ${if (steerBig) "BIG" else "SMALL"}   Gyro: ${if (gyroOn) "ON" else "OFF"}",
-            w / 2f, h * 0.68f, smallText
-        )
-        canvas.drawText("Menu se change • 3 dots in game", w / 2f, h * 0.73f, smallText)
+        // settings row
+        drawSettingChip(canvas, btnGyro, if (gyroOn) "Gyro ON" else "Gyro OFF", gyroOn)
+        val sensLabel = when (steerSens) {
+            0 -> "Steer: Small"; 2 -> "Steer: Big"; else -> "Steer: Normal"
+        }
+        drawSettingChip(canvas, btnSens, sensLabel, true)
+        drawSettingChip(canvas, btnSound, if (soundOn) "Sound ON" else "Sound OFF", soundOn)
 
-        canvas.drawRoundRect(btnStart, 20f, 20f, startPaint)
+        canvas.drawRoundRect(btnLevels, 16f, 16f, openPaint)
         textPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText("START", btnStart.centerX(), btnStart.centerY() + 10f, textPaint)
+        canvas.drawText("SELECT LEVEL (1-$maxLevelReached)", btnLevels.centerX(), btnLevels.centerY() + 10f, textPaint)
+
+        canvas.drawRoundRect(btnStart, 18f, 18f, startPaint)
+        canvas.drawText("START Lv $maxLevelReached", btnStart.centerX(), btnStart.centerY() + 12f, textPaint)
+
+        // tiny dots always available
+        drawDotsButton(canvas)
         textPaint.textAlign = Paint.Align.LEFT
+        smallText.textAlign = Paint.Align.LEFT
+        accent.textAlign = Paint.Align.LEFT
+    }
+
+    private fun drawSettingChip(canvas: Canvas, r: RectF, label: String, on: Boolean) {
+        canvas.drawRoundRect(r, 12f, 12f, if (on) btnOn else btnFace)
+        smallText.textAlign = Paint.Align.CENTER
+        canvas.drawText(label, r.centerX(), r.centerY() + 7f, smallText)
+    }
+
+    private fun drawLevels(canvas: Canvas) {
+        canvas.drawRect(0f, 0f, w, h, menuBg)
+        accent.textAlign = Paint.Align.CENTER
+        canvas.drawText("Levels  |  Unlocked: 1–$maxLevelReached / $MAX_LEVEL", w / 2f, 40f, accent)
+
+        val startLv = levelPage * 20 + 1
+        for (i in 0 until 20) {
+            val lv = startLv + i
+            if (lv > MAX_LEVEL) break
+            val r = levelCells[i]
+            val unlocked = lv <= maxLevelReached
+            canvas.drawRoundRect(r, 12f, 12f, if (unlocked) openPaint else lockPaint)
+            textPaint.textAlign = Paint.Align.CENTER
+            textPaint.textSize = 22f
+            canvas.drawText(if (unlocked) "$lv" else "🔒$lv", r.centerX(), r.centerY() + 8f, textPaint)
+        }
+        textPaint.textSize = 28f
+
+        canvas.drawRoundRect(btnPagePrev, 12f, 12f, btnFace)
+        canvas.drawRoundRect(btnPageNext, 12f, 12f, btnFace)
+        canvas.drawRoundRect(btnBack, 12f, 12f, startPaint)
+        smallText.textAlign = Paint.Align.CENTER
+        canvas.drawText("◀ Prev", btnPagePrev.centerX(), btnPagePrev.centerY() + 7f, smallText)
+        canvas.drawText("Next ▶", btnPageNext.centerX(), btnPageNext.centerY() + 7f, smallText)
+        canvas.drawText("Back", btnBack.centerX(), btnBack.centerY() + 7f, smallText)
+        drawDotsButton(canvas)
         smallText.textAlign = Paint.Align.LEFT
         accent.textAlign = Paint.Align.LEFT
     }
@@ -650,31 +717,34 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
     private fun drawPlay(canvas: Canvas) {
         canvas.drawRect(0f, 0f, w, h, skyPaint)
         canvas.drawRect(0f, h * 0.08f, w, h, asphalt)
-        canvas.drawRect(w * 0.15f, h * 0.15f, w * 0.9f, h * 0.9f, asphaltDark)
+        canvas.drawRect(w * 0.16f, h * 0.16f, w * 0.9f, h * 0.9f, asphaltDark)
         for (i in 1..8) {
-            val y = h * 0.08f + h * 0.9f * i / 9f
+            val y = h * 0.1f + h * 0.85f * i / 9f
             canvas.drawLine(20f, y, w - 20f, y, linePaint)
         }
+
         for (wall in walls) {
             canvas.drawRoundRect(wall, 5f, 5f, wallPaint)
             canvas.drawRect(wall.left, wall.top - 8f, wall.right, wall.top, wallTop)
         }
         for (b in barriers) canvas.drawRoundRect(b, 4f, 4f, barrierPaint)
 
+        // parked traffic cars
         for (pc in parkedCars) {
             canvas.save()
             canvas.translate(pc.x, pc.y)
             canvas.rotate(pc.angle)
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pc.color }
-            canvas.drawRoundRect(-26f, -42f, 26f, 42f, 10f, 10f, p)
+            canvas.drawRoundRect(-24f, -46f, 24f, 46f, 10f, 10f, shadowPaint)
+            canvas.drawRoundRect(-22f, -44f, 22f, 44f, 10f, 10f, p)
             canvas.restore()
         }
 
         canvas.save()
         canvas.translate(slotX, slotY)
         canvas.rotate(slotAngle)
-        canvas.drawRoundRect(-slotW / 2, -slotH / 2, slotW / 2, slotH / 2, 12f, 12f, slotFill)
-        canvas.drawRoundRect(-slotW / 2, -slotH / 2, slotW / 2, slotH / 2, 12f, 12f, slotStroke)
+        canvas.drawRoundRect(-slotW / 2, -slotH / 2, slotW / 2, slotH / 2, 10f, 10f, slotFill)
+        canvas.drawRoundRect(-slotW / 2, -slotH / 2, slotW / 2, slotH / 2, 10f, 10f, slotStroke)
         smallText.textAlign = Paint.Align.CENTER
         smallText.color = Color.parseColor("#00b894")
         canvas.drawText("P", 0f, 8f, smallText)
@@ -684,98 +754,77 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
 
         drawCar(canvas)
 
-        if (blastLife > 0) {
-            blastPaint.alpha = (blastLife * 6).coerceAtMost(255)
-            blastPaint.textSize = 40f + (40 - blastLife)
+        if (blastTimer > 0) {
+            blastPaint.textSize = 56f + (45 - blastTimer)
             canvas.drawText("💥", blastX, blastY, blastPaint)
         }
 
-        // Minimal top: only 3 dots
-        canvas.drawRoundRect(btnDots, 16f, 16f, btnFace)
-        textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = 28f
-        canvas.drawText("⋮", btnDots.centerX(), btnDots.centerY() + 10f, textPaint)
-
-        // thin status line
+        // slim top: only message strip + 3 dots (no permanent name bar clutter)
+        canvas.drawRect(0f, 0f, w, 44f, uiBg)
         smallText.textAlign = Paint.Align.LEFT
-        canvas.drawText("Lv $level/$MAX_LEVEL  ★$stars  $message", 12f, 28f, smallText)
+        canvas.drawText("Lv $level/$MAX_LEVEL  SPD ${"%.1f".format(abs(speed))}  Steer:${steerLabel()}", 12f, 28f, smallText)
+        drawDotsButton(canvas)
+
+        canvas.drawRect(0f, 44f, w, 72f, uiBg)
+        canvas.drawText(message, 12f, 62f, smallText)
 
         val st = steerValue()
         val th = throttleValue()
-        drawCtrl(canvas, btnLeft, "◀ STEER", st < 0, btnFace, btnOn)
-        drawCtrl(canvas, btnRight, "STEER ▶", st > 0, btnFace, btnOn)
+        drawCtrl(canvas, btnLeft, "◀", st < 0, btnFace, btnOn)
+        drawCtrl(canvas, btnRight, "▶", st > 0, btnFace, btnOn)
         drawCtrl(canvas, btnGas, "GAS", th > 0, gasFace, gasOn)
         drawCtrl(canvas, btnRev, "REV", th < 0, revFace, revOn)
 
+        // labels near controls
         smallText.textAlign = Paint.Align.CENTER
-        canvas.drawText(
-            "SPD ${"%.1f".format(abs(speed))}  ${if (gyroOn) "GYRO ON" else ""}",
-            w / 2f, h - 14f, smallText
-        )
+        canvas.drawText("STEER", (btnLeft.centerX() + btnRight.centerX()) / 2f, btnLeft.top - 8f, smallText)
+        canvas.drawText("SPEED", btnGas.centerX(), btnGas.top - 8f, smallText)
         smallText.textAlign = Paint.Align.LEFT
 
         if (parked) {
             canvas.drawRoundRect(btnNext, 18f, 18f, startPaint)
             textPaint.textAlign = Paint.Align.CENTER
-            canvas.drawText(
-                if (level < MAX_LEVEL) "NEXT LEVEL ▶" else "ALL CLEAR ★",
-                btnNext.centerX(), btnNext.centerY() + 10f, textPaint
-            )
+            val next = if (level < MAX_LEVEL) "NEXT LEVEL ▶" else "🎉 FINISH"
+            canvas.drawText(next, btnNext.centerX(), btnNext.centerY() + 12f, textPaint)
             textPaint.textAlign = Paint.Align.LEFT
         }
     }
 
-    private fun drawPanel(canvas: Canvas) {
-        canvas.drawRoundRect(panelRect, 24f, 24f, panelBg)
-        var y = panelRect.top + 36f
-        val cx = panelRect.centerX()
-        accent.textAlign = Paint.Align.CENTER
-        canvas.drawText("Jishan Menu", cx, y, accent)
-        y += 36f
-        smallText.textAlign = Paint.Align.CENTER
-        canvas.drawText("Score: $score", cx, y, smallText); y += 26f
-        canvas.drawText("Wins: $wins    Crashes: $crashes", cx, y, smallText); y += 26f
-        canvas.drawText("Stars: $totalStars    Max Level: $maxReached", cx, y, smallText); y += 34f
+    private fun steerLabel() = when (steerSens) {
+        0 -> "Small"; 2 -> "Big"; else -> "Normal"
+    }
 
-        // toggles
-        canvas.drawText(
-            "[Steer ${if (steerBig) "BIG" else "SMALL"}]   [Gyro ${if (gyroOn) "ON" else "OFF"}]",
-            cx, y, smallText
-        )
-        y += 22f
-        canvas.drawText("Tap labels to toggle  •  Tap level to play (unlocked)", cx, y, smallText)
-        y += 30f
+    private fun drawDotsButton(canvas: Canvas) {
+        canvas.drawRoundRect(btnDots, 12f, 12f, btnFace)
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = 28f
+        canvas.drawText("⋮", btnDots.centerX(), btnDots.centerY() + 10f, textPaint)
+        textPaint.textSize = 28f
+        textPaint.textAlign = Paint.Align.LEFT
+    }
 
-        // level grid 1..100
-        val cols = 10
-        val cell = (panelRect.width() - 40f) / cols
-        val startY = y
-        for (lv in 1..MAX_LEVEL) {
-            val i = lv - 1
-            val col = i % cols
-            val row = i / cols
-            val left = panelRect.left + 20f + col * cell
-            val top = startY + row * (cell * 0.55f) - panelScroll
-            if (top < panelRect.top + 20 || top > panelRect.bottom - 30) continue
-            val r = RectF(left + 2, top, left + cell - 4, top + cell * 0.48f)
-            val unlocked = lv <= maxReached
-            canvas.drawRoundRect(r, 8f, 8f, if (unlocked) cardBg else lockedPaint)
-            smallText.textAlign = Paint.Align.CENTER
-            smallText.color = if (unlocked) Color.WHITE else Color.GRAY
-            canvas.drawText("$lv", r.centerX(), r.centerY() + 6f, smallText)
-            smallText.color = Color.parseColor("#dfe6e9")
-        }
-        smallText.textAlign = Paint.Align.CENTER
-        canvas.drawText("Tap outside / ⋮ to close", cx, panelRect.bottom - 16f, smallText)
-        smallText.textAlign = Paint.Align.LEFT
-        accent.textAlign = Paint.Align.LEFT
+    private fun drawDotsPanel(canvas: Canvas) {
+        canvas.drawRoundRect(dotsPanel, 16f, 16f, panelBg)
+        var ty = dotsPanel.top + 36f
+        val cx = dotsPanel.left + 16f
+        accent.textSize = 22f
+        canvas.drawText("Jishan Gaming", cx, ty, accent); ty += 34f
+        smallText.textSize = 18f
+        canvas.drawText("Score: $score", cx, ty, smallText); ty += 28f
+        canvas.drawText("Wins: $winCount", cx, ty, smallText); ty += 28f
+        canvas.drawText("Crashes: $crashCount 💥", cx, ty, smallText); ty += 28f
+        canvas.drawText("Stars: $totalStars ★", cx, ty, smallText); ty += 28f
+        canvas.drawText("Max Level: $maxLevelReached / $MAX_LEVEL", cx, ty, smallText); ty += 28f
+        canvas.drawText("Steer: ${steerLabel()}", cx, ty, smallText); ty += 28f
+        canvas.drawText("Gyro: ${if (gyroOn) "ON" else "OFF"}", cx, ty, smallText); ty += 28f
+        canvas.drawText("Tap ⋮ again to close", cx, ty, smallText)
     }
 
     private fun drawCtrl(canvas: Canvas, r: RectF, label: String, on: Boolean, off: Paint, active: Paint) {
-        canvas.drawRoundRect(r, r.height() / 2.2f, r.height() / 2.2f, if (on) active else off)
+        canvas.drawRoundRect(r, r.height() / 2f, r.height() / 2f, if (on) active else off)
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = if (steerBig) 22f else 18f
-        canvas.drawText(label, r.centerX(), r.centerY() + 7f, textPaint)
+        textPaint.textSize = 24f
+        canvas.drawText(label, r.centerX(), r.centerY() + 8f, textPaint)
         textPaint.textSize = 28f
         textPaint.textAlign = Paint.Align.LEFT
     }
@@ -788,8 +837,8 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         val ww = carWidth / 2
         canvas.drawRoundRect(-ww + 5, -l + 6, ww + 8, l + 10, 12f, 12f, shadowPaint)
         canvas.drawRoundRect(-ww, -l, ww, l, 12f, 12f, carBody)
-        canvas.drawRoundRect(-ww * 0.7f, -l * 0.2f, ww * 0.7f, l * 0.3f, 8f, 8f, carDark)
-        canvas.drawRoundRect(-ww * 0.6f, -l * 0.1f, ww * 0.6f, l * 0.2f, 6f, 6f, carGlass)
+        canvas.drawRoundRect(-ww * 0.72f, -l * 0.22f, ww * 0.72f, l * 0.32f, 8f, 8f, carDark)
+        canvas.drawRoundRect(-ww * 0.6f, -l * 0.12f, ww * 0.6f, l * 0.22f, 6f, 6f, carGlass)
         canvas.drawCircle(-ww * 0.5f, -l + 10, 5f, carLight)
         canvas.drawCircle(ww * 0.5f, -l + 10, 5f, carLight)
         canvas.drawCircle(-ww * 0.45f, l - 8, 4f, rearPaint)
@@ -797,103 +846,110 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
         canvas.restore()
     }
 
-    private fun levelCellAt(x: Float, y: Float): Int {
-        val cols = 10
-        val cell = (panelRect.width() - 40f) / cols
-        var y0 = panelRect.top + 36f + 36f + 26f + 26f + 34f + 22f + 30f
-        for (lv in 1..MAX_LEVEL) {
-            val i = lv - 1
-            val col = i % cols
-            val row = i / cols
-            val left = panelRect.left + 20f + col * cell
-            val top = y0 + row * (cell * 0.55f) - panelScroll
-            val r = RectF(left + 2, top, left + cell - 4, top + cell * 0.48f)
-            if (r.contains(x, y)) return lv
-        }
-        return -1
-    }
-
     override fun onTouch(v: View?, event: MotionEvent): Boolean {
         if (!ready) return true
-        val x = event.x
-        val y = event.y
+        val action = event.actionMasked
 
-        if (state == MENU) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                for (i in carCards.indices) if (carCards[i].contains(x, y)) {
-                    selectedCar = i; saveStats(); return true
-                }
-                // quick toggles on menu text area
-                if (y > h * 0.64f && y < h * 0.72f) {
-                    if (x < w / 2) steerBig = !steerBig else {
-                        gyroOn = !gyroOn
-                        if (gyroOn) registerGyro() else unregisterGyro()
-                    }
-                    layoutAll()
-                    saveStats()
-                    return true
-                }
-                if (btnStart.contains(x, y)) {
-                    applySkin()
-                    setupLevel(maxReached.coerceIn(1, MAX_LEVEL))
-                    state = PLAY
-                    if (gyroOn) registerGyro()
-                    message = "2 ungli: GAS + STEER"
-                }
+        // Global dots toggle on DOWN
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            val i = event.actionIndex
+            val x = event.getX(i)
+            val y = event.getY(i)
+            if (btnDots.contains(x, y)) {
+                showDotsMenu = !showDotsMenu
+                invalidate()
+                return true
             }
-            return true
+            if (showDotsMenu && !dotsPanel.contains(x, y)) {
+                showDotsMenu = false
+            }
         }
 
-        if (state == PANEL) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                if (!panelRect.contains(x, y) || btnDots.contains(x, y)) {
-                    state = PLAY
-                    return true
-                }
-                // toggle steer / gyro by y band
-                if (y < panelRect.top + 200f) {
-                    if (x < panelRect.centerX()) {
-                        steerBig = !steerBig
-                        layoutAll()
-                    } else {
-                        gyroOn = !gyroOn
-                        if (gyroOn) registerGyro() else unregisterGyro()
-                    }
-                    saveStats()
-                    return true
-                }
-                val lv = levelCellAt(x, y)
-                if (lv in 1..maxReached) {
+        when (state) {
+            MENU -> return touchMenu(event)
+            LEVELS -> return touchLevels(event)
+            else -> return touchPlay(event)
+        }
+    }
+
+    private fun touchMenu(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return true
+        val x = event.x; val y = event.y
+        for (i in cars.indices) if (carCards[i].contains(x, y)) {
+            selectedCar = i; saveStats(); invalidate(); return true
+        }
+        if (btnGyro.contains(x, y)) {
+            gyroOn = !gyroOn; saveStats(); beep(ToneGenerator.TONE_PROP_BEEP); return true
+        }
+        if (btnSens.contains(x, y)) {
+            steerSens = (steerSens + 1) % 3; saveStats(); return true
+        }
+        if (btnSound.contains(x, y)) {
+            soundOn = !soundOn; saveStats(); return true
+        }
+        if (btnLevels.contains(x, y)) {
+            state = LEVELS; levelPage = 0; showDotsMenu = false; return true
+        }
+        if (btnStart.contains(x, y)) {
+            applySkin()
+            setupLevel(maxLevelReached.coerceAtMost(MAX_LEVEL))
+            state = PLAY
+            showDotsMenu = false
+            beep(ToneGenerator.TONE_PROP_BEEP)
+        }
+        return true
+    }
+
+    private fun touchLevels(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return true
+        val x = event.x; val y = event.y
+        if (btnBack.contains(x, y)) { state = MENU; return true }
+        if (btnPagePrev.contains(x, y)) {
+            levelPage = (levelPage - 1).coerceAtLeast(0); return true
+        }
+        if (btnPageNext.contains(x, y)) {
+            levelPage = (levelPage + 1).coerceAtMost(4); return true // 0..4 = 100 levels
+        }
+        val startLv = levelPage * 20 + 1
+        for (i in 0 until 20) {
+            val lv = startLv + i
+            if (lv > MAX_LEVEL) break
+            if (levelCells[i].contains(x, y)) {
+                if (lv <= maxLevelReached) {
+                    applySkin()
                     setupLevel(lv)
                     state = PLAY
+                    showDotsMenu = false
                     beep(ToneGenerator.TONE_PROP_BEEP)
+                } else {
+                    message = "🔒 Level $lv locked — pehle clear karo"
+                    beep(ToneGenerator.TONE_CDMA_SOFT_ERROR_LITE)
                 }
+                return true
             }
-            return true
         }
+        return true
+    }
 
-        // PLAY
+    private fun touchPlay(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = event.actionIndex
                 val id = event.getPointerId(i)
-                val px = event.getX(i)
-                val py = event.getY(i)
-                if (btnDots.contains(px, py)) {
-                    state = PANEL
-                    pointerRole.clear()
-                    return true
-                }
+                val x = event.getX(i)
+                val y = event.getY(i)
                 if (crashed) {
-                    setupLevel(level)
-                    return true
+                    setupLevel(level); return true
                 }
-                if (parked && btnNext.contains(px, py)) {
+                if (parked && btnNext.contains(x, y)) {
                     if (level < MAX_LEVEL) setupLevel(level + 1)
-                    else state = MENU
+                    else {
+                        state = MENU
+                        message = "🎉 All 100 levels done!"
+                    }
                     return true
                 }
-                val role = roleAt(px, py)
+                val role = roleAt(x, y)
                 if (role != ROLE_NONE) pointerRole[id] = role
             }
             MotionEvent.ACTION_MOVE -> {
