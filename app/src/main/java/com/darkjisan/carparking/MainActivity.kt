@@ -6,37 +6,49 @@ import android.graphics.*
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.*
-import kotlin.math.*
+import android.view.MotionEvent
+import android.view.View
+import android.view.Window
+import android.view.WindowManager
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 
-/**
- * Jishan Gaming - Offline Car Parking
- * Steering, GAS, REV, stars, no online/IAP
- */
 class MainActivity : Activity() {
 
-    private lateinit var gameView: GameView
+    private var gameView: GameView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestWindowFeature(Window.FEATURE_NO_TITLE)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
-        gameView = GameView(this)
-        setContentView(gameView)
+        try {
+            requestWindowFeature(Window.FEATURE_NO_TITLE)
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+            )
+            gameView = GameView(this)
+            setContentView(gameView)
+        } catch (t: Throwable) {
+            val tv = android.widget.TextView(this)
+            tv.text = "Error: ${t.message}"
+            tv.setTextColor(Color.WHITE)
+            tv.setBackgroundColor(Color.BLACK)
+            tv.setPadding(40, 40, 40, 40)
+            setContentView(tv)
+        }
     }
 
     override fun onPause() {
         super.onPause()
-        gameView.pauseGame()
+        gameView?.pauseGame()
     }
 
     override fun onResume() {
         super.onResume()
-        gameView.resumeGame()
+        gameView?.resumeGame()
     }
 }
 
@@ -44,6 +56,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
 
     private var w = 0f
     private var h = 0f
+    private var ready = false
 
     private var carX = 200f
     private var carY = 400f
@@ -63,7 +76,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
     private var score = 0
     private var parked = false
     private var crashed = false
-    private var message = "Jishan Gaming - Level 1: Slot mein park karo"
+    private var message = "Jishan Gaming - Loading..."
     private var stars = 0
 
     private var slotX = 0f
@@ -74,96 +87,60 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
 
     private val walls = mutableListOf<RectF>()
 
-    private val skyPaint = Paint().apply {
-        shader = LinearGradient(0f, 0f, 0f, 400f,
-            Color.parseColor("#1a1a2e"), Color.parseColor("#16213e"), Shader.TileMode.CLAMP)
-    }
-    private val asphalt = Paint().apply { color = Color.parseColor("#2d3436"); style = Paint.Style.FILL }
-    private val asphaltLine = Paint().apply {
+    private val skyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val asphalt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2d3436") }
+    private val asphaltLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#fdcb6e")
         strokeWidth = 3f
         style = Paint.Style.STROKE
         pathEffect = DashPathEffect(floatArrayOf(30f, 20f), 0f)
     }
-    private val slotStroke = Paint().apply {
+    private val slotStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#00b894")
         style = Paint.Style.STROKE
         strokeWidth = 7f
-        isAntiAlias = true
     }
-    private val slotFill = Paint().apply {
+    private val slotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#00b894")
         alpha = 50
-        style = Paint.Style.FILL
     }
-    private val wallPaint = Paint().apply {
-        color = Color.parseColor("#636e72")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val wallTop = Paint().apply {
-        color = Color.parseColor("#b2bec3")
-        style = Paint.Style.FILL
-    }
-    private val carRed = Paint().apply {
-        color = Color.parseColor("#d63031")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val carDark = Paint().apply {
-        color = Color.parseColor("#2d3436")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val carGlass = Paint().apply {
+    private val wallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#636e72") }
+    private val wallTop = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#b2bec3") }
+    private val carRed = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#d63031") }
+    private val carDark = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2d3436") }
+    private val carGlass = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#74b9ff")
         alpha = 200
-        style = Paint.Style.FILL
-        isAntiAlias = true
     }
-    private val carLight = Paint().apply {
-        color = Color.parseColor("#ffeaa7")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val shadowPaint = Paint().apply {
+    private val carLight = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#ffeaa7") }
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
         alpha = 70
-        style = Paint.Style.FILL
-        isAntiAlias = true
     }
-    private val uiBg = Paint().apply { color = Color.parseColor("#0a0a12"); alpha = 200 }
-    private val textPaint = Paint().apply {
+    private val rearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#ff7675") }
+    private val uiBg = Paint().apply {
+        color = Color.parseColor("#0a0a12")
+        alpha = 200
+    }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 34f
-        isAntiAlias = true
         typeface = Typeface.DEFAULT_BOLD
     }
-    private val smallText = Paint().apply {
+    private val smallText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#dfe6e9")
         textSize = 24f
-        isAntiAlias = true
     }
-    private val accentText = Paint().apply {
+    private val accentText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#a29bfe")
         textSize = 28f
-        isAntiAlias = true
         typeface = Typeface.DEFAULT_BOLD
     }
-    private val btnPaint = Paint().apply {
-        color = Color.parseColor("#2d3436")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val btnActive = Paint().apply {
-        color = Color.parseColor("#6c5ce7")
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-    private val starPaint = Paint().apply {
+    private val btnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2d3436") }
+    private val btnActive = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#6c5ce7") }
+    private val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#fdcb6e")
         textSize = 40f
-        isAntiAlias = true
     }
 
     private val btnLeft = RectF()
@@ -174,20 +151,19 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
 
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
-    private val tickMs = 16L
 
     private val loop = object : Runnable {
         override fun run() {
             if (!running) return
-            update()
+            if (ready) update()
             invalidate()
-            handler.postDelayed(this, tickMs)
+            handler.postDelayed(this, 16L)
         }
     }
 
     init {
         setOnTouchListener(this)
-        setupLevel(1)
+        setBackgroundColor(Color.parseColor("#1a1a2e"))
     }
 
     fun resumeGame() {
@@ -203,6 +179,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldw: Int, oldh: Int) {
+        if (width <= 0 || height <= 0) return
         w = width.toFloat()
         h = height.toFloat()
         skyPaint.shader = LinearGradient(
@@ -213,6 +190,8 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         )
         layoutButtons()
         setupLevel(level)
+        ready = true
+        message = "Level $level - Slot mein park karo"
     }
 
     private fun layoutButtons() {
@@ -226,6 +205,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
     }
 
     private fun setupLevel(lv: Int) {
+        if (w < 10f || h < 10f) return
         level = lv
         parked = false
         crashed = false
@@ -237,27 +217,27 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
             1 -> {
                 carX = w * 0.18f; carY = h * 0.55f; carAngle = 0f
                 slotX = w * 0.72f; slotY = h * 0.55f; slotAngle = 0f
-                message = "Level 1 - Seedha slot mein park karo (dheere)"
+                message = "Level 1 - Seedha slot mein park karo"
             }
             2 -> {
                 carX = w * 0.15f; carY = h * 0.72f; carAngle = -20f
                 slotX = w * 0.68f; slotY = h * 0.38f; slotAngle = 90f
                 walls.add(RectF(w * 0.38f, h * 0.12f, w * 0.44f, h * 0.88f))
-                message = "Level 2 - Side parking + deewar se door raho"
+                message = "Level 2 - Side parking + deewar se door"
             }
             3 -> {
                 carX = w * 0.2f; carY = h * 0.22f; carAngle = 90f
                 slotX = w * 0.62f; slotY = h * 0.62f; slotAngle = -40f
                 walls.add(RectF(w * 0.36f, h * 0.36f, w * 0.52f, h * 0.44f))
                 walls.add(RectF(w * 0.48f, h * 0.22f, w * 0.54f, h * 0.5f))
-                message = "Level 3 - Angle park - control tight rakho"
+                message = "Level 3 - Angle park - control tight"
             }
             else -> {
                 carX = w * 0.18f; carY = h * 0.5f; carAngle = 0f
                 slotX = w * 0.68f; slotY = h * 0.45f
                 slotAngle = ((lv * 20) % 80).toFloat()
                 walls.add(RectF(w * 0.4f, h * 0.15f, w * 0.47f, h * 0.85f))
-                message = "Level $lv - Challenge mode - stars ke liye slow park"
+                message = "Level $lv - Stars ke liye slow park"
             }
         }
     }
@@ -289,7 +269,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         for (wall in walls) {
             if (RectF.intersects(box, wall)) {
                 crashed = true
-                message = "Crash! Screen touch karke dobara try karo"
+                message = "Crash! Touch karke dobara try"
                 speed = 0f
                 return
             }
@@ -304,7 +284,7 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
                 abs(speed) < 2.5f -> 2
                 else -> 1
             }
-            message = "Park ho gaya! ${"★".repeat(stars)}  Score: $score  → Next touch karo"
+            message = "Parked! ${"*".repeat(stars)} Score:$score  Next touch"
             speed = 0f
         }
     }
@@ -332,7 +312,13 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (w <= 0) return
+        if (!ready || w <= 0f) {
+            canvas.drawColor(Color.parseColor("#1a1a2e"))
+            smallText.textAlign = Paint.Align.CENTER
+            canvas.drawText("Jishan Gaming...", width / 2f, height / 2f, smallText)
+            smallText.textAlign = Paint.Align.LEFT
+            return
+        }
 
         canvas.drawRect(0f, 0f, w, h, skyPaint)
         canvas.drawRect(0f, h * 0.12f, w, h, asphalt)
@@ -360,22 +346,20 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         canvas.drawText("Jishan Gaming", 20f, 32f, accentText)
         canvas.drawText("Level $level", 20f, 62f, textPaint)
         canvas.drawText("Score $score", w * 0.38f, 50f, textPaint)
-        if (stars > 0) {
-            canvas.drawText("★".repeat(stars), w * 0.72f, 55f, starPaint)
-        }
+        if (stars > 0) canvas.drawText("*".repeat(stars), w * 0.72f, 55f, starPaint)
 
         canvas.drawRect(0f, 78f, w, 118f, uiBg)
         canvas.drawText(message, 20f, 105f, smallText)
 
-        drawBtn(canvas, btnLeft, "◀", steer < 0)
-        drawBtn(canvas, btnRight, "▶", steer > 0)
+        drawBtn(canvas, btnLeft, "<", steer < 0)
+        drawBtn(canvas, btnRight, ">", steer > 0)
         drawBtn(canvas, btnGas, "GAS", throttle > 0)
         drawBtn(canvas, btnBrake, "REV", throttle < 0)
 
         if (parked) {
             canvas.drawRoundRect(btnNext, 18f, 18f, btnActive)
             textPaint.textAlign = Paint.Align.CENTER
-            canvas.drawText("Next Level ▶", btnNext.centerX(), btnNext.centerY() + 12f, textPaint)
+            canvas.drawText("Next Level", btnNext.centerX(), btnNext.centerY() + 12f, textPaint)
             textPaint.textAlign = Paint.Align.LEFT
         }
     }
@@ -393,26 +377,21 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         canvas.save()
         canvas.translate(carX, carY)
         canvas.rotate(carAngle)
-
         val l = carLength / 2
         val ww = carWidth / 2
-
         canvas.drawRoundRect(-ww + 6, -l + 8, ww + 10, l + 12, 12f, 12f, shadowPaint)
         canvas.drawRoundRect(-ww, -l, ww, l, 12f, 12f, carRed)
         canvas.drawRoundRect(-ww * 0.75f, -l * 0.25f, ww * 0.75f, l * 0.35f, 8f, 8f, carDark)
         canvas.drawRoundRect(-ww * 0.65f, -l * 0.15f, ww * 0.65f, l * 0.25f, 6f, 6f, carGlass)
-
         canvas.drawCircle(-ww * 0.55f, -l + 10, 6f, carLight)
         canvas.drawCircle(ww * 0.55f, -l + 10, 6f, carLight)
-
-        val rear = Paint().apply { color = Color.parseColor("#ff7675"); isAntiAlias = true }
-        canvas.drawCircle(-ww * 0.5f, l - 8, 5f, rear)
-        canvas.drawCircle(ww * 0.5f, l - 8, 5f, rear)
-
+        canvas.drawCircle(-ww * 0.5f, l - 8, 5f, rearPaint)
+        canvas.drawCircle(ww * 0.5f, l - 8, 5f, rearPaint)
         canvas.restore()
     }
 
     override fun onTouch(v: View?, event: MotionEvent): Boolean {
+        if (!ready) return true
         val x = event.x
         val y = event.y
         when (event.actionMasked) {
