@@ -216,7 +216,8 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
                 val amp = (140 + level.coerceAtMost(90)).coerceAtMost(255)
                 v.vibrate(VibrationEffect.createOneShot(dur, amp))
             } else {
-                @Suppress("DEPRECATION"); v.vibrate(dur)
+                @Suppress("DEPRECATION")
+                v.vibrate(dur)
             }
         } catch (_: Throwable) {}
     }
@@ -226,7 +227,10 @@ class GameView(context: Context) : View(context), View.OnTouchListener, SensorEv
             if (!v.hasVibrator()) return
             val pattern = longArrayOf(0, 70, 50, 90, 50, 120)
             if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createWaveform(pattern, -1))
-            else { @Suppress("DEPRECATION"); v.vibrate(pattern, -1) }
+            else {
+                @Suppress("DEPRECATION")
+                v.vibrate(pattern, -1)
+            }
         } catch (_: Throwable) {}
     }
 
