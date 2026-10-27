@@ -1,9 +1,10 @@
-# Royal Deck 🃏
+# Royal Parking Pro
 
-Offline parking challenge by Royal Deck.
+Offline pro parking game.
 
 - 100 levels
-- Free cars, no online, no IAP
-- Steering + GAS + optional Gyro
+- Free cars
+- Steering + GAS + Gyro option
+- No online / no IAP
 
-Brand: **Royal Deck** 🃏
+**Brand:** Royal Parking Pro
