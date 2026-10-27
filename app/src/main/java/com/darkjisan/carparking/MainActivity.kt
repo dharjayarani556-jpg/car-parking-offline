@@ -80,7 +80,6 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
     }
     private val asphalt = Paint().apply { color = Color.parseColor("#2d3436"); style = Paint.Style.FILL }
     private val asphaltLine = Paint().apply {
-        color = Color.parseColor("# recap")
         color = Color.parseColor("#fdcb6e")
         strokeWidth = 3f
         style = Paint.Style.STROKE
@@ -335,23 +334,19 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         super.onDraw(canvas)
         if (w <= 0) return
 
-        // Background
         canvas.drawRect(0f, 0f, w, h, skyPaint)
         canvas.drawRect(0f, h * 0.12f, w, h, asphalt)
 
-        // Parking lot lines
         for (i in 1..8) {
             val y = h * 0.12f + (h * 0.88f) * i / 9f
             canvas.drawLine(40f, y, w - 40f, y, asphaltLine)
         }
 
-        // Walls with simple 3D top edge
         for (wall in walls) {
             canvas.drawRoundRect(wall, 6f, 6f, wallPaint)
             canvas.drawRect(wall.left, wall.top - 8f, wall.right, wall.top, wallTop)
         }
 
-        // Slot
         canvas.save()
         canvas.translate(slotX, slotY)
         canvas.rotate(slotAngle)
@@ -361,7 +356,6 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
 
         drawCar(canvas)
 
-        // Top HUD
         canvas.drawRect(0f, 0f, w, 78f, uiBg)
         canvas.drawText("Jishan Gaming", 20f, 32f, accentText)
         canvas.drawText("Level $level", 20f, 62f, textPaint)
@@ -403,20 +397,14 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
         val l = carLength / 2
         val ww = carWidth / 2
 
-        // shadow (pseudo-3D)
         canvas.drawRoundRect(-ww + 6, -l + 8, ww + 10, l + 12, 12f, 12f, shadowPaint)
-
-        // body
         canvas.drawRoundRect(-ww, -l, ww, l, 12f, 12f, carRed)
-        // roof / cabin height illusion
         canvas.drawRoundRect(-ww * 0.75f, -l * 0.25f, ww * 0.75f, l * 0.35f, 8f, 8f, carDark)
         canvas.drawRoundRect(-ww * 0.65f, -l * 0.15f, ww * 0.65f, l * 0.25f, 6f, 6f, carGlass)
 
-        // lights
         canvas.drawCircle(-ww * 0.55f, -l + 10, 6f, carLight)
         canvas.drawCircle(ww * 0.55f, -l + 10, 6f, carLight)
 
-        // rear lights
         val rear = Paint().apply { color = Color.parseColor("#ff7675"); isAntiAlias = true }
         canvas.drawCircle(-ww * 0.5f, l - 8, 5f, rear)
         canvas.drawCircle(ww * 0.5f, l - 8, 5f, rear)
@@ -446,12 +434,6 @@ class GameView(context: Context) : View(context), View.OnTouchListener {
                     btnGas.contains(x, y) -> 1
                     btnBrake.contains(x, y) -> -1
                     else -> throttle
-                }
-                // If touch not on any btn, don't force zero mid-drag of other finger - simplify:
-                if (!btnLeft.contains(x, y) && !btnRight.contains(x, y) &&
-                    !btnGas.contains(x, y) && !btnBrake.contains(x, y) && !parked
-                ) {
-                    // ignore
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
