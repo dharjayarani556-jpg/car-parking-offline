@@ -1,18 +1,10 @@
-# Car Parking Offline
+# Jishan Gaming - Car Parking Offline
 
-Offline Android car parking game.
+Offline parking game by Jishan Gaming.
 
-## Features
-- Offline only (no online / friends / multiplayer)
-- Free cars (no in-app purchase)
-- On-screen steering + accelerate + reverse
-- Multiple parking levels
-- Hinglish UI
-- Score + star rating per level
+- No online / multiplayer / IAP
+- Steering + GAS + REV
+- Stars on perfect park
+- Free play
 
-## Build APK
-GitHub Actions builds APK on every push. Check **Actions** tab → Artifacts.
-
-## Note
-This is an original simple parking game inspired by common parking mechanics.
-Not a copy of any commercial game APK.
+APK: GitHub Actions → Artifacts
