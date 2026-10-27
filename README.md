@@ -1,10 +1,9 @@
-# Jishan Gaming - Car Parking Offline
+# Royal Deck 🃏
 
-Offline parking game by Jishan Gaming.
+Offline parking challenge by Royal Deck.
 
-- No online / multiplayer / IAP
-- Steering + GAS + REV
-- Stars on perfect park
-- Free play
+- 100 levels
+- Free cars, no online, no IAP
+- Steering + GAS + optional Gyro
 
-APK: GitHub Actions → Artifacts
+Brand: **Royal Deck** 🃏
